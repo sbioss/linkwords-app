@@ -6,254 +6,121 @@
   <meta name="theme-color" content="#0B1020" />
   <link rel="manifest" href="manifest.json" />
   <title>LinkWords</title>
-
   <style>
     :root{
-      --bg:#070B16;
-      --bg2:#0B1020;
-      --panel:#10182B;
-      --panel-2:#0D1426;
-      --card:#1A2639;
-      --line:#2B3B57;
-      --text:#EAF1FF;
-      --muted:#9FB1CE;
-      --brand:#3B82F6;
-      --ok:#16A34A;
-      --err:#DC2626;
-      --warn:#F59E0B;
-      --radius:14px;
-      --radius-sm:10px;
-      --shadow:0 6px 22px rgba(0,0,0,.35);
+      --bg:#070B16; --bg2:#0B1020; --panel:#10182B; --panel2:#0D1426; --card:#1A2639;
+      --line:#2B3B57; --text:#EAF1FF; --muted:#9FB1CE; --brand:#3B82F6;
+      --ok:#16A34A; --err:#DC2626; --warn:#F59E0B;
       --safe-bottom: env(safe-area-inset-bottom, 0px);
     }
-
     *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-    html,body{margin:0;padding:0;background:linear-gradient(160deg,var(--bg),var(--bg2));color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
-
-    .app{
-      max-width:560px;           /* foco mobile */
-      margin:0 auto;
-      min-height:100dvh;
-      padding:14px 12px calc(14px + var(--safe-bottom));
-    }
-
-    .screen{display:none}
-    .screen.active{display:block}
-
-    .panel{
-      background:linear-gradient(180deg,var(--panel),var(--panel-2));
-      border:1px solid var(--line);
-      border-radius:var(--radius);
-      box-shadow:var(--shadow);
-      padding:14px;
-    }
-
-    .title{
-      margin:0 0 6px;
-      font-size:1.35rem;
-      font-weight:800;
-      letter-spacing:.2px;
-    }
-    .subtitle{
-      margin:0 0 14px;
-      color:var(--muted);
-      font-size:.95rem;
-      line-height:1.4;
-    }
-
-    .row{
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-      align-items:center;
-    }
-    .row.stretch > *{flex:1}
+    html,body{margin:0;background:linear-gradient(160deg,var(--bg),var(--bg2));color:var(--text);font-family:Inter,system-ui,Arial,sans-serif}
+    .app{max-width:560px;margin:0 auto;min-height:100dvh;padding:14px 12px calc(14px + var(--safe-bottom))}
+    .screen{display:none}.screen.active{display:block}
+    .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:14px;padding:14px}
+    .title{margin:0 0 6px;font-size:1.35rem;font-weight:800}
+    .subtitle{margin:0 0 14px;color:var(--muted);font-size:.95rem;line-height:1.4}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.row.stretch>*{flex:1}
     .spacer{height:10px}
-
     button,select{
-      background:#111C31;
-      color:var(--text);
-      border:1px solid var(--line);
-      border-radius:12px;
-      min-height:44px;
-      padding:10px 12px;
-      font-weight:700;
-      font-size:.95rem;
-      outline:none;
+      background:#111C31;color:var(--text);border:1px solid var(--line);border-radius:12px;
+      min-height:44px;padding:10px 12px;font-weight:700;font-size:.95rem
     }
+    .btn-primary{background:linear-gradient(180deg,#3B82F6,#1D4ED8);border-color:#1D4ED8;color:#fff}
 
-    button:active{transform:translateY(1px)}
-    .btn-primary{
-      background:linear-gradient(180deg,#3B82F6,#1D4ED8);
-      border-color:#1D4ED8;
-      color:#fff;
-    }
-
-    /* GAME */
-    .top{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:8px;
-      margin-bottom:10px;
-    }
-
+    .top{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
     .pill{
-      border:1px solid var(--line);
-      background:#0D172C;
-      border-radius:999px;
-      padding:7px 10px;
-      color:var(--muted);
-      font-size:.82rem;
-      min-height:34px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      white-space:nowrap;
+      border:1px solid var(--line);background:#0D172C;border-radius:999px;padding:7px 10px;
+      color:var(--muted);font-size:.82rem;min-height:34px;display:flex;align-items:center;justify-content:center
     }
     .pill b{color:var(--text)}
-    .pill.title-pill{
-      grid-column:1 / -1;
-      justify-content:flex-start;
-      font-weight:700;
-      color:#DCE8FF;
-    }
+    .pill.title-pill{grid-column:1/-1;justify-content:flex-start;font-weight:700;color:#DCE8FF}
 
-    .board{
-      display:grid;
-      grid-template-columns:1fr;
-      gap:10px;
-    }
-
-    .col{
-      background:linear-gradient(180deg,#0F1A31,#0C1527);
-      border:1px solid var(--line);
-      border-radius:var(--radius);
-      padding:10px;
-    }
-    .col h3{
-      margin:0 0 8px;
-      color:var(--muted);
-      font-size:.84rem;
-      letter-spacing:.4px;
-    }
-
-    .list{
-      display:grid;
-      gap:8px;
-      min-height:248px;
-    }
-
+    .board{display:grid;grid-template-columns:1fr;gap:10px}
+    .col{background:linear-gradient(180deg,#0F1A31,#0C1527);border:1px solid var(--line);border-radius:14px;padding:10px}
+    .col h3{margin:0 0 8px;color:var(--muted);font-size:.84rem}
+    .list{display:grid;gap:8px;min-height:248px}
     .card{
-      border:1px solid #344969;
-      background:var(--card);
-      color:var(--text);
-      border-radius:12px;
-      min-height:52px;
-      padding:12px;
-      text-align:left;
-      font-size:1.06rem;
-      font-weight:700;
-      line-height:1.2;
+      border:1px solid #344969;background:var(--card);color:var(--text);
+      border-radius:12px;min-height:52px;padding:12px;text-align:left;font-size:1.02rem;font-weight:700
     }
+    .card.selected{border-color:var(--warn);box-shadow:0 0 0 2px rgba(245,158,11,.22) inset}
+    .card.ok{border-color:var(--ok);background:rgba(22,163,74,.18)}
+    .card.err{border-color:var(--err);background:rgba(220,38,38,.17)}
 
-    .card.selected{
-      border-color:var(--warn);
-      box-shadow:0 0 0 2px rgba(245,158,11,.25) inset;
-    }
-    .card.ok{
-      border-color:var(--ok);
-      background:rgba(22,163,74,.18);
-    }
-    .card.err{
-      border-color:var(--err);
-      background:rgba(220,38,38,.17);
-    }
+    .quick-actions{margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .msg{margin-top:10px;min-height:22px;color:var(--muted);font-size:.94rem;font-weight:600}
 
-    .quick-actions{
-      margin-top:10px;
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:8px;
-    }
-
-    .msg{
-      margin-top:10px;
-      min-height:22px;
-      color:var(--muted);
-      font-size:.94rem;
-      font-weight:600;
-    }
-
-    /* END SCREEN */
-    .list-end{
-      display:grid;
-      gap:8px;
-      margin-top:10px;
-      max-height:52dvh;
-      overflow:auto;
-      padding-right:2px;
-    }
+    .list-end{display:grid;gap:8px;max-height:52dvh;overflow:auto}
     .end-item{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:8px;
-      border:1px solid var(--line);
-      background:#0B1427;
-      border-radius:12px;
-      padding:10px;
-      font-size:.95rem;
+      display:flex;justify-content:space-between;align-items:center;gap:8px;
+      border:1px solid var(--line);background:#0B1427;border-radius:12px;padding:10px;font-size:.95rem
     }
 
-    .muted{color:var(--muted)}
-
-    /* Desktop fallback bonitinho */
     @media (min-width:920px){
       .app{max-width:1100px;padding:20px}
-      .top{
-        grid-template-columns:1.6fr repeat(5,1fr);
-      }
+      .top{grid-template-columns:1.6fr repeat(5,1fr)}
       .pill.title-pill{grid-column:auto}
       .board{grid-template-columns:1fr 1fr}
-      .quick-actions{
-        grid-template-columns:auto auto;
-        justify-content:flex-start;
-      }
+    }
+    .lang-grid{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:8px;
+    }
+    .lang-btn{
+      min-height:44px;
+      border:1px solid var(--line);
+      background:#111C31;
+      color:var(--text);
+      border-radius:12px;
+      font-weight:700;
+    }
+    .lang-btn.active{
+      border-color:#3B82F6;
+      box-shadow:0 0 0 2px rgba(59,130,246,.22) inset;
+      background:linear-gradient(180deg,#1A2E56,#142443);
+    }
+    .lang-btn:disabled{
+      opacity:.6;
+      cursor:not-allowed;
     }
   </style>
 </head>
-
 <body>
   <div class="app">
 
-    <!-- TELA INICIAL -->
+    <!-- INÍCIO -->
     <section id="startScreen" class="screen active">
       <div class="panel">
         <h1 class="title">🎯 LinkWords</h1>
-        <p class="subtitle">
-          Treino rápido de vocabulário por associação. Modo leitura e áudio, progressão por nível e revisão inteligente.
-        </p>
+        <p class="subtitle">Treino rápido de vocabulário por associação. Modo leitura e áudio, progressão por nível e revisão inteligente.</p>
 
-        <div class="row stretch">
-          <select id="languageSelect">
-            <option value="en-pt">Inglês → Português</option>
-            <option value="ja-pt">Japonês → Português (em breve)</option>
-          </select>
+        <!-- Idioma como opções visíveis -->
+        <div class="lang-grid">
+          <button id="langEnPtBtn" class="lang-btn active" type="button" data-lang="en-pt">
+            Inglês → Português
+          </button>
+
+          <button id="langJaPtBtn" class="lang-btn" type="button" data-lang="ja-pt" disabled>
+          Japonês → Português (em breve)
+          </button>
         </div>
 
         <div class="spacer"></div>
 
         <div class="row stretch">
           <button id="startGameBtn" class="btn-primary">Iniciar</button>
+          <button id="startReinforceBtn">🔥 Reforçando</button>
           <button id="goSettingsBtn">Settings</button>
         </div>
       </div>
     </section>
 
-    <!-- TELA JOGO -->
+    <!-- JOGO -->
     <section id="gameScreen" class="screen">
       <div class="top">
-        <div class="pill title-pill"><b id="gameTitle">LinkWords (EN ↔ PT)</b></div>
+        <div class="pill title-pill"><b id="gameTitle">LinkWords</b></div>
         <div class="pill">Nível: <b id="level">A1</b></div>
         <div class="pill">Acertos: <b id="xp">0</b></div>
         <div class="pill">Rodada: <b id="roundScore">0</b></div>
@@ -280,11 +147,11 @@
       <div id="msg" class="msg"></div>
     </section>
 
-    <!-- TELA SETTINGS -->
+    <!-- SETTINGS -->
     <section id="settingsScreen" class="screen">
       <div class="panel">
         <h2 class="title" style="font-size:1.2rem;">⚙️ Settings</h2>
-        <p class="subtitle">Configurações, conteúdo e relatórios.</p>
+        <p class="subtitle">Conteúdo, progresso e relatórios.</p>
 
         <div class="row stretch">
           <button id="pickJsonBtn">Escolher JSON</button>
@@ -317,12 +184,11 @@
       </div>
     </section>
 
-    <!-- TELA PÓS-JOGO -->
+    <!-- PÓS-JOGO -->
     <section id="endScreen" class="screen">
       <div class="panel">
         <h2 class="title" style="font-size:1.2rem;">🏁 Fim da partida</h2>
-        <p class="subtitle" id="endSummary">Resumo da rodada</p>
-
+        <p class="subtitle" id="endSummary">Resumo</p>
         <div id="endList" class="list-end"></div>
 
         <div class="spacer"></div>
@@ -335,7 +201,6 @@
     </section>
 
   </div>
-
   <script src="app.js"></script>
 </body>
 </html>

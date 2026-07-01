@@ -1,94 +1,67 @@
 (() => {
   const BOARD_SIZE = 6;
   const ROUND_TIME = 120;
+  const CEFR = ["A1", "A2", "B1", "B2", "C1", "C2"];
   const MASTER_STREAK = 3;
   const MASTER_CORRECT = 4;
   const REVIEW_CHANCE = 0.18;
-  const CEFR = ["A1", "A2", "B1", "B2", "C1", "C2"];
 
   const LANGS = {
-    "en-pt": {
-      id: "en-pt",
-      label: "Inglês → Português",
-      sourceLabel: "INGLÊS",
-      targetLabel: "PORTUGUÊS",
-      defaultFile: "content.json",
-      ttsLang: "en-US"
-    },
-    "ja-pt": {
-      id: "ja-pt",
-      label: "Japonês → Português",
-      sourceLabel: "JAPONÊS",
-      targetLabel: "PORTUGUÊS",
-      defaultFile: "content-ja.json",
-      ttsLang: "ja-JP"
-    }
+    "en-pt": { label: "LinkWords (EN ↔ PT)", source: "INGLÊS", target: "PORTUGUÊS", file: "content.json", tts: "en-US" },
+    "ja-pt": { label: "LinkWords (JA ↔ PT)", source: "JAPONÊS", target: "PORTUGUÊS", file: "content-ja.json", tts: "ja-JP" }
   };
 
   const KEYS = {
-    customContent: "lw_custom_content_v1",
-    progress: "lw_progress_v1",
-    lang: "lw_lang_v1"
+    lang: "lw_lang_v1",
+    custom: "lw_custom_v1",
+    progress: "lw_progress_v1"
   };
 
   const $ = (id) => document.getElementById(id);
   const shuffle = (arr) => arr.map(v => [Math.random(), v]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
   const idx = (lv) => CEFR.indexOf(lv);
 
-  // ---------- state ----------
   let content = null;
   let bank = new Map();
   let activeItems = [];
   let wrongMap = new Map();
+  let timerId = null;
 
   let currentLanguage = localStorage.getItem(KEYS.lang) || "en-pt";
-
-  let time = ROUND_TIME, roundScore = 0, totalCorrect = 0;
-  let currentLevelIdx = 0, introducedNextCount = 0, roundNumber = 0, roundMode = "word", playMode = "text";
-  let selectedEn = null, selectedPt = null, timerId = null;
-
+  let currentLevelIdx = 0, introducedNextCount = 0, roundNumber = 0;
+  let roundMode = "word", playMode = "text", sessionType = "normal";
+  let totalCorrect = 0, roundScore = 0, time = ROUND_TIME;
+  let selectedEn = null, selectedPt = null;
   let previousScreen = "startScreen";
+  let reinforcePool = [];
 
   // ---------- screen ----------
   function showScreen(id){
     document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
-    $(id)?.classList.add("active");
+    $(id).classList.add("active");
   }
-
-  function goStartScreen(){
-    clearInterval(timerId);
-    showScreen("startScreen");
-  }
-
-  function goGameScreen(){
-    showScreen("gameScreen");
-  }
-
-  function goSettingsScreen(from = "startScreen"){
-    previousScreen = from;
-    showScreen("settingsScreen");
-  }
-
+  function goStart(){ clearInterval(timerId); showScreen("startScreen"); }
+  function goGame(){ showScreen("gameScreen"); }
+  function goSettings(from="startScreen"){ previousScreen = from; showScreen("settingsScreen"); }
   function goBackFromSettings(){
-    showScreen(previousScreen || "startScreen");
-  }
-
-  function goEndScreen(){
-    showScreen("endScreen");
+    showScreen(previousScreen);
+    if (previousScreen === "gameScreen" && time > 0) startTimer();
   }
 
   // ---------- helpers ----------
-  function enKey(text){
-    return String(text || "").trim().toLowerCase();
-  }
+  function langCfg(){ return LANGS[currentLanguage] || LANGS["en-pt"]; }
+  function enKey(s){ return String(s||"").trim().toLowerCase(); }
 
-  function isEnInActive(en, ignoreId = null){
-    const key = enKey(en);
-    return activeItems.some(i => i.id !== ignoreId && enKey(i.en) === key);
+  function renderLanguageButtons(){
+    const enBtn = $("langEnPtBtn");
+    const jaBtn = $("langJaPtBtn");
+
+    if (enBtn) enBtn.classList.toggle("active", currentLanguage === "en-pt");
+    if (jaBtn) jaBtn.classList.toggle("active", currentLanguage === "ja-pt");
   }
 
   function normText(s){
-    return String(s || "")
+    return String(s||"")
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
@@ -103,97 +76,64 @@
     return [...base, ...extra].map(normText).filter(Boolean);
   }
 
-  function isEquivalentPT(enItem, ptItem){
-    const a = new Set(ptVariants(enItem));
-    const b = new Set(ptVariants(ptItem));
-    for (const v of a) if (b.has(v)) return true;
+  function isEquivalentPT(a, b){
+    const A = new Set(ptVariants(a));
+    const B = new Set(ptVariants(b));
+    for (const v of A) if (B.has(v)) return true;
     return false;
   }
 
-  function getLangCfg(){
-    return LANGS[currentLanguage] || LANGS["en-pt"];
+  function isEnInActive(en, ignoreId = null){
+    const key = enKey(en);
+    return activeItems.some(i => i.id !== ignoreId && enKey(i.en) === key);
   }
 
-  // ---------- UI ----------
-  function setMsg(t, kind=""){
+  function setMsg(msg, kind=""){
     const el = $("msg");
-    if (!el) return;
-    el.textContent = t;
-    el.style.color = kind==="ok" ? "#86efac" : kind==="err" ? "#fca5a5" : "#94a3b8";
+    el.textContent = msg;
+    el.style.color = kind==="ok" ? "#86efac" : kind==="err" ? "#fca5a5" : "#9FB1CE";
   }
 
-  function hud(){
-    $("level").textContent = CEFR[currentLevelIdx];
-    $("xp").textContent = totalCorrect;
-    $("roundScore").textContent = roundScore;
-    $("time").textContent = time;
-    $("playMode").textContent = playMode === "audio" ? "Escuta" : "Leitura";
-
-    const cfg = getLangCfg();
-    $("sourceColumnTitle").textContent = cfg.sourceLabel;
-    $("targetColumnTitle").textContent = cfg.targetLabel;
-    $("gameTitle").textContent = cfg.label;
-  }
-
-  function resetRoundBuffers(){
-    wrongMap = new Map();
-    selectedEn = null;
-    selectedPt = null;
-  }
-
-  // ---------- audio ----------
+  // ---------- tts ----------
   function speakSource(text){
-    const cfg = getLangCfg();
-
-    if ("speechSynthesis" in window) {
+    const cfg = langCfg();
+    if ("speechSynthesis" in window){
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = cfg.ttsLang;
+      u.lang = cfg.tts;
       u.rate = 0.95;
       window.speechSynthesis.speak(u);
       return;
     }
-
-    const encoded = encodeURIComponent(text);
-    const target = cfg.ttsLang.startsWith("ja") ? "ja" : "en";
-    const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${target}&q=${encoded}`;
-    const audio = new Audio(url);
-    audio.play().catch(() => {});
+    const tl = cfg.tts.startsWith("ja") ? "ja" : "en";
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${tl}&q=${encodeURIComponent(text)}`;
+    new Audio(url).play().catch(()=>{});
   }
 
-  function decidePlayMode(){
-    playMode = (roundNumber % 2 === 0) ? "audio" : "text";
-  }
+  // ---------- storage keys by language ----------
+  const keyCustom = () => `${KEYS.custom}_${currentLanguage}`;
+  const keyProgress = () => `${KEYS.progress}_${currentLanguage}`;
 
   // ---------- content ----------
   function validateContent(obj){
     if (!obj || typeof obj !== "object" || !obj.levels) throw new Error("JSON inválido: faltou levels.");
-    for (const lv of CEFR) {
+    for (const lv of CEFR){
       const node = obj.levels[lv] || { words: [], phrases: [] };
       if (!Array.isArray(node.words) || !Array.isArray(node.phrases)) throw new Error(`JSON inválido em ${lv}.`);
       for (const w of node.words) if (!w.en || !w.pt) throw new Error(`Palavra inválida em ${lv}.`);
       for (const p of node.phrases) if (!p.en || !p.pt) throw new Error(`Frase inválida em ${lv}.`);
     }
-    return true;
   }
 
-  async function loadDefaultContent() {
-    const cfg = getLangCfg();
-    const res = await fetch(cfg.defaultFile);
-    if (!res.ok) throw new Error(`Não consegui carregar ${cfg.defaultFile}`);
+  async function loadDefaultContent(){
+    const res = await fetch(langCfg().file);
+    if (!res.ok) throw new Error(`Não consegui carregar ${langCfg().file}`);
     return res.json();
   }
 
-  function customKeyByLang(){
-    return `${KEYS.customContent}_${currentLanguage}`;
-  }
-  function progressKeyByLang(){
-    return `${KEYS.progress}_${currentLanguage}`;
-  }
-
-  async function loadContent() {
-    const custom = localStorage.getItem(customKeyByLang());
-    if (custom) {
+  async function loadContent(){
+    const custom = localStorage.getItem(keyCustom());
+    if (custom){
       const parsed = JSON.parse(custom);
       validateContent(parsed);
       return parsed;
@@ -203,47 +143,25 @@
     return def;
   }
 
-  function saveCustomContent(obj){
-    localStorage.setItem(customKeyByLang(), JSON.stringify(obj));
-  }
-
-  function clearCustomContent(){
-    localStorage.removeItem(customKeyByLang());
-  }
-
-  // ---------- bank ----------
-  function makeId(type, lv, i, en){
-    const slug = String(en).toLowerCase().replace(/[^a-z0-9\u3040-\u30ff\u4e00-\u9faf]+/g, "-").slice(0, 28);
-    return `${type}_${lv}_${i}_${slug}`;
-  }
-
-  function rebuildBank() {
+  function rebuildBank(){
     bank = new Map();
-    for (const lv of CEFR) {
+    for (const lv of CEFR){
       const node = content.levels[lv] || { words: [], phrases: [] };
+
       node.words.forEach((w, i) => {
-        const id = makeId("w", lv, i, w.en);
+        const id = `w_${lv}_${i}_${String(w.en).toLowerCase().replace(/[^a-z0-9\u3040-\u30ff\u4e00-\u9faf]+/g, "-").slice(0,28)}`;
         bank.set(id, {
-          id,
-          en: w.en,
-          pt: w.pt,
-          ptAlt: Array.isArray(w.ptAlt) ? w.ptAlt : [],
-          cefr: lv,
-          type: "word",
-          prereqWords: [],
+          id, en: w.en, pt: w.pt, ptAlt: Array.isArray(w.ptAlt) ? w.ptAlt : [],
+          cefr: lv, type: "word", prereqWords: [],
           correct: 0, wrong: 0, streak: 0, mastered: false, active: false, seenRound: 0
         });
       });
+
       node.phrases.forEach((p, i) => {
-        const id = makeId("p", lv, i, p.en);
+        const id = `p_${lv}_${i}_${String(p.en).toLowerCase().replace(/[^a-z0-9\u3040-\u30ff\u4e00-\u9faf]+/g, "-").slice(0,28)}`;
         bank.set(id, {
-          id,
-          en: p.en,
-          pt: p.pt,
-          ptAlt: Array.isArray(p.ptAlt) ? p.ptAlt : [],
-          cefr: lv,
-          type: "phrase",
-          prereqWords: Array.isArray(p.prereqWords) ? p.prereqWords : [],
+          id, en: p.en, pt: p.pt, ptAlt: Array.isArray(p.ptAlt) ? p.ptAlt : [],
+          cefr: lv, type: "phrase", prereqWords: Array.isArray(p.prereqWords) ? p.prereqWords : [],
           correct: 0, wrong: 0, streak: 0, mastered: false, active: false, seenRound: 0
         });
       });
@@ -254,27 +172,26 @@
   // ---------- progress ----------
   function saveProgress(){
     const stats = {};
-    for (const [id, it] of bank.entries()) {
+    for (const [id, it] of bank.entries()){
       stats[id] = { c: it.correct, w: it.wrong, s: it.streak, m: it.mastered };
     }
-
-    localStorage.setItem(progressKeyByLang(), JSON.stringify({
+    localStorage.setItem(keyProgress(), JSON.stringify({
       totalCorrect, currentLevelIdx, introducedNextCount, roundNumber, stats
     }));
   }
 
   function loadProgress(){
-    const raw = localStorage.getItem(progressKeyByLang());
+    const raw = localStorage.getItem(keyProgress());
     if (!raw) return;
     try{
       const p = JSON.parse(raw);
       totalCorrect = Number(p.totalCorrect || 0);
-      currentLevelIdx = Math.min(5, Math.max(0, Number(p.currentLevelIdx || 0)));
-      introducedNextCount = Math.min(2, Math.max(0, Number(p.introducedNextCount || 0)));
+      currentLevelIdx = Math.max(0, Math.min(5, Number(p.currentLevelIdx || 0)));
+      introducedNextCount = Math.max(0, Math.min(2, Number(p.introducedNextCount || 0)));
       roundNumber = Number(p.roundNumber || 0);
 
-      if (p.stats) {
-        for (const [id, st] of Object.entries(p.stats)) {
+      if (p.stats){
+        for (const [id, st] of Object.entries(p.stats)){
           const it = bank.get(id);
           if (!it) continue;
           it.correct = st.c || 0;
@@ -287,20 +204,10 @@
   }
 
   function resetProgress(){
-    totalCorrect = 0;
-    currentLevelIdx = 0;
-    introducedNextCount = 0;
-    roundNumber = 0;
-
-    for (const it of bank.values()) {
-      it.correct = 0;
-      it.wrong = 0;
-      it.streak = 0;
-      it.mastered = false;
-      it.active = false;
-      it.seenRound = 0;
+    totalCorrect = 0; currentLevelIdx = 0; introducedNextCount = 0; roundNumber = 0;
+    for (const it of bank.values()){
+      it.correct = 0; it.wrong = 0; it.streak = 0; it.mastered = false; it.active = false; it.seenRound = 0;
     }
-
     saveProgress();
   }
 
@@ -318,31 +225,15 @@
     const next = currentLevelIdx + 1;
     if (next >= CEFR.length) return;
 
-    const currLv = CEFR[currentLevelIdx];
-    const nextLv = CEFR[next];
-    const curr = levelStats(currLv);
-    const nx = levelStats(nextLv);
+    const curr = levelStats(CEFR[currentLevelIdx]);
+    const nx = levelStats(CEFR[next]);
 
-    if (introducedNextCount===0 && curr.ratio>=0.72 && curr.attempts>=24 && curr.acc>=0.68) {
-      introducedNextCount = 1;
-      setMsg(`Introduzindo 1 item de ${nextLv}.`, "ok");
-      saveProgress();
-      return;
-    }
-
-    if (introducedNextCount===1 && curr.ratio>=0.84 && curr.attempts>=34 && curr.acc>=0.72) {
-      introducedNextCount = 2;
-      setMsg(`Agora até 2 itens de ${nextLv}.`, "ok");
-      saveProgress();
-      return;
-    }
+    if (introducedNextCount===0 && curr.ratio>=0.72 && curr.attempts>=24 && curr.acc>=0.68){ introducedNextCount = 1; saveProgress(); return; }
+    if (introducedNextCount===1 && curr.ratio>=0.84 && curr.attempts>=34 && curr.acc>=0.72){ introducedNextCount = 2; saveProgress(); return; }
 
     const nextReady = nx.attempts>=18 && (nx.acc>=0.62 || nx.ratio>=0.20);
-    if (introducedNextCount>=2 && curr.ratio>=0.90 && curr.acc>=0.75 && nextReady) {
-      currentLevelIdx = next;
-      introducedNextCount = 0;
-      setMsg(`Subiu para ${CEFR[currentLevelIdx]}.`, "ok");
-      saveProgress();
+    if (introducedNextCount>=2 && curr.ratio>=0.90 && curr.acc>=0.75 && nextReady){
+      currentLevelIdx = next; introducedNextCount = 0; saveProgress();
     }
   }
 
@@ -354,38 +245,66 @@
     return "phrase";
   }
 
-  function masteredWordsSet(){
-    const s = new Set();
-    for (const it of bank.values()) if (it.type==="word" && it.mastered) s.add(it.en.toLowerCase());
-    return s;
-  }
-
-  function phraseEligible(it){
-    if (it.type!=="phrase" || idx(it.cefr) > currentLevelIdx) return false;
-    const req = it.prereqWords || [];
-    if (!req.length) return true;
-
-    const solid = masteredWordsSet();
-    const hit = req.filter(w => solid.has(String(w).toLowerCase())).length;
-    return hit >= Math.ceil(req.length / 2);
+  function decidePlayMode(){
+    playMode = (roundNumber % 2 === 0) ? "audio" : "text";
   }
 
   function smartSort(pool){
     return pool.sort((a,b)=>{
-      const am = a.mastered ? 1 : 0;
-      const bm = b.mastered ? 1 : 0;
+      const am = a.mastered ? 1 : 0, bm = b.mastered ? 1 : 0;
       if (am!==bm) return am-bm;
-
-      const as = a.correct-a.wrong;
-      const bs = b.correct-b.wrong;
+      const as = a.correct-a.wrong, bs = b.correct-b.wrong;
       if (as!==bs) return as-bs;
-
       return a.seenRound - b.seenRound;
     });
   }
 
+  function masteredWordsSet(){
+    const s = new Set();
+    for (const i of bank.values()) if (i.type==="word" && i.mastered) s.add(i.en.toLowerCase());
+    return s;
+  }
+
+  function phraseEligible(it){
+    if (it.type!=="phrase" || idx(it.cefr)>currentLevelIdx) return false;
+    const req = it.prereqWords || [];
+    if (!req.length) return true;
+    const solid = masteredWordsSet();
+    const hit = req.filter(w => solid.has(String(w).toLowerCase())).length;
+    return hit >= Math.ceil(req.length/2);
+  }
+
+  // ---------- reinforce ----------
+  function getUnlockedWords(){
+    return [...bank.values()].filter(i => i.type==="word" && idx(i.cefr)<=currentLevelIdx);
+  }
+
+  function buildReinforcePool(){
+    const unlocked = getUnlockedWords();
+    if (!unlocked.length){ reinforcePool = []; return; }
+
+    const withErrors = unlocked.filter(i => i.wrong > 0);
+    const base = withErrors.length ? withErrors : [...unlocked]
+      .sort((a,b)=>((b.wrong-b.correct)-(a.wrong-a.correct)))
+      .slice(0, Math.min(20, unlocked.length));
+
+    reinforcePool = base.map(item => ({
+      item,
+      weight: Math.max(1, 1 + item.wrong*4 + (item.wrong>item.correct?3:0) + (item.mastered?0:2))
+    }));
+  }
+
+  function weightedChoice(pool){
+    const total = pool.reduce((s,p)=>s+p.weight,0);
+    if (!total) return null;
+    let r = Math.random() * total;
+    for (const p of pool){ r -= p.weight; if (r <= 0) return p.item; }
+    return pool[pool.length-1]?.item || null;
+  }
+
+  // ---------- board fill ----------
   function fillWordRound(){
-    for (const it of bank.values()) it.active = false;
+    for (const i of bank.values()) i.active = false;
     activeItems = [];
 
     const all = [...bank.values()].filter(i => i.type==="word");
@@ -397,32 +316,21 @@
     const nextQ = Math.min(introducedNextCount, 2, next.length);
     const currQ = Math.max(0, BOARD_SIZE - reviewQ - nextQ);
 
-    const picks = [];
-    const usedEn = new Set();
-
-    const addFrom = (arr, wanted) => {
-      if (wanted <= 0) return;
-      const sorted = smartSort([...arr]);
-      for (const it of sorted) {
-        if (wanted <= 0 || picks.length >= BOARD_SIZE) break;
-        const k = enKey(it.en);
-        if (usedEn.has(k)) continue;
-        picks.push(it);
-        usedEn.add(k);
-        wanted--;
+    const picks = [], usedEn = new Set();
+    const addFrom = (arr, q) => {
+      for (const it of smartSort([...arr])){
+        if (q<=0 || picks.length>=BOARD_SIZE) break;
+        const k = enKey(it.en); if (usedEn.has(k)) continue;
+        picks.push(it); usedEn.add(k); q--;
       }
     };
 
-    addFrom(curr, currQ);
-    addFrom(next, nextQ);
-    addFrom(prev, reviewQ);
+    addFrom(curr, currQ); addFrom(next, nextQ); addFrom(prev, reviewQ);
 
-    for (const it of smartSort([...all])) {
-      if (picks.length >= BOARD_SIZE) break;
-      const k = enKey(it.en);
-      if (usedEn.has(k)) continue;
-      picks.push(it);
-      usedEn.add(k);
+    for (const it of smartSort([...all])){
+      if (picks.length>=BOARD_SIZE) break;
+      const k = enKey(it.en); if (usedEn.has(k)) continue;
+      picks.push(it); usedEn.add(k);
     }
 
     activeItems = shuffle(picks.slice(0, BOARD_SIZE));
@@ -430,67 +338,120 @@
   }
 
   function fillPhraseRound(){
-    for (const it of bank.values()) it.active = false;
+    for (const i of bank.values()) i.active = false;
 
     let pool = smartSort([...bank.values()].filter(i => i.type==="phrase" && phraseEligible(i)));
-    if (!pool.length) {
-      pool = smartSort([...bank.values()].filter(i => i.type==="word" && idx(i.cefr)<=currentLevelIdx));
-    }
+    if (!pool.length) pool = smartSort(getUnlockedWords());
 
-    const picks = [];
-    const usedEn = new Set();
-
-    for (const it of pool) {
-      if (picks.length >= BOARD_SIZE) break;
-      const k = enKey(it.en);
-      if (usedEn.has(k)) continue;
-      picks.push(it);
-      usedEn.add(k);
+    const picks = [], usedEn = new Set();
+    for (const it of pool){
+      if (picks.length>=BOARD_SIZE) break;
+      const k = enKey(it.en); if (usedEn.has(k)) continue;
+      picks.push(it); usedEn.add(k);
     }
 
     activeItems = shuffle(picks);
     activeItems.forEach(i => { i.active = true; i.seenRound = roundNumber; });
   }
 
+  function fillReinforceRound(){
+    for (const i of bank.values()) i.active = false;
+    activeItems = [];
+    buildReinforcePool();
+
+    const usedIds = new Set(), usedEn = new Set();
+    while (activeItems.length < BOARD_SIZE){
+      let cand = null;
+      for (let t=0; t<80; t++){
+        const x = weightedChoice(reinforcePool);
+        if (!x) break;
+        if (usedIds.has(x.id) || usedEn.has(enKey(x.en)) || x.active) continue;
+        cand = x; break;
+      }
+      if (!cand) break;
+      cand.active = true; cand.seenRound = roundNumber;
+      activeItems.push(cand); usedIds.add(cand.id); usedEn.add(enKey(cand.en));
+    }
+
+    if (activeItems.length < BOARD_SIZE){
+      for (const f of smartSort(getUnlockedWords())){
+        if (activeItems.length>=BOARD_SIZE) break;
+        if (usedEn.has(enKey(f.en)) || f.active) continue;
+        f.active = true; f.seenRound = roundNumber;
+        activeItems.push(f); usedEn.add(enKey(f.en));
+      }
+    }
+
+    activeItems = shuffle(activeItems);
+  }
+
   function fillBoard(){
-    if (roundMode === "phrase") fillPhraseRound();
+    if (sessionType === "reinforce") fillReinforceRound();
+    else if (roundMode === "phrase") fillPhraseRound();
     else fillWordRound();
     renderBoard();
   }
 
   function replaceMatched(oldId){
-    const idxOld = activeItems.findIndex(i => i.id===oldId);
-    if (idxOld < 0) return;
-
-    const old = activeItems[idxOld];
+    const i = activeItems.findIndex(x => x.id===oldId);
+    if (i<0) return;
+    const old = activeItems[i];
     old.active = false;
 
+    if (sessionType === "reinforce"){
+      buildReinforcePool();
+      const activeEn = new Set(activeItems.filter(x=>x.id!==oldId).map(x=>enKey(x.en)));
+
+      let next = null;
+      for (let t=0; t<80; t++){
+        const cand = weightedChoice(reinforcePool);
+        if (!cand) break;
+        if (cand.active || activeEn.has(enKey(cand.en))) continue;
+        next = cand; break;
+      }
+
+      if (next){
+        next.active = true; next.seenRound = roundNumber;
+        activeItems[i] = next;
+      } else activeItems.splice(i,1);
+
+      renderBoard();
+      return;
+    }
+
     let pool = [];
-    if (roundMode==="phrase") {
-      pool = smartSort([...bank.values()].filter(i => i.type==="phrase" && !i.active && phraseEligible(i)));
+    if (roundMode==="phrase"){
+      pool = smartSort([...bank.values()].filter(x => x.type==="phrase" && !x.active && phraseEligible(x)));
     } else {
-      pool = smartSort([...bank.values()].filter(i => i.type==="word" && !i.active && idx(i.cefr)<=currentLevelIdx+1));
+      pool = smartSort([...bank.values()].filter(x => x.type==="word" && !x.active && idx(x.cefr)<=currentLevelIdx+1));
     }
 
     const next = pool.find(c => !isEnInActive(c.en, oldId));
-
-    if (next) {
-      next.active = true;
-      next.seenRound = roundNumber;
-      activeItems[idxOld] = next;
-    } else {
-      activeItems.splice(idxOld,1);
-    }
+    if (next){
+      next.active = true; next.seenRound = roundNumber;
+      activeItems[i] = next;
+    } else activeItems.splice(i,1);
 
     renderBoard();
   }
 
-  // ---------- render / game ----------
+  // ---------- render ----------
+  function hud(){
+    const cfg = langCfg();
+    $("gameTitle").textContent = sessionType === "reinforce" ? `${cfg.label} • Reforçando` : cfg.label;
+    $("sourceColumnTitle").textContent = cfg.source;
+    $("targetColumnTitle").textContent = cfg.target;
+
+    $("level").textContent = CEFR[currentLevelIdx];
+    $("xp").textContent = totalCorrect;
+    $("roundScore").textContent = roundScore;
+    $("playMode").textContent = playMode==="audio" ? "Escuta" : "Leitura";
+    $("time").textContent = time;
+  }
+
   function renderBoard(){
-    const en = $("enList");
-    const pt = $("ptList");
-    en.innerHTML = "";
-    pt.innerHTML = "";
+    const en = $("enList"), pt = $("ptList");
+    en.innerHTML = ""; pt.innerHTML = "";
 
     const enCards = shuffle([...activeItems]);
     const ptCards = shuffle([...activeItems]);
@@ -500,19 +461,14 @@
       b.className = "card";
       b.dataset.key = it.id;
 
-      if (playMode === "audio") {
+      if (playMode === "audio"){
         b.textContent = "🔊";
-        b.setAttribute("aria-label", `Ouvir ${it.en}`);
-        b.title = "Toque para ouvir";
-        b.onclick = () => {
-          speakSource(it.en);
-          pick("en", it.id, b);
-        };
+        b.title = `Ouvir ${it.en}`;
+        b.onclick = () => { speakSource(it.en); pick("en", it.id, b); };
       } else {
         b.textContent = it.en;
         b.onclick = () => pick("en", it.id, b);
       }
-
       en.appendChild(b);
     });
 
@@ -529,15 +485,8 @@
   }
 
   function clearSelections(){
-    document.querySelectorAll(".card.selected").forEach(c=>c.classList.remove("selected"));
-    selectedEn = null;
-    selectedPt = null;
-  }
-
-  function checkMastery(it){
-    if (!it.mastered && it.streak >= MASTER_STREAK && it.correct >= MASTER_CORRECT) {
-      it.mastered = true;
-    }
+    document.querySelectorAll(".card.selected").forEach(c => c.classList.remove("selected"));
+    selectedEn = null; selectedPt = null;
   }
 
   function markWrong(a, b){
@@ -545,60 +494,48 @@
     if (b) wrongMap.set(b.id, b);
   }
 
+  function checkMastery(it){
+    if (!it.mastered && it.streak >= MASTER_STREAK && it.correct >= MASTER_CORRECT) it.mastered = true;
+  }
+
   function pick(side, id, el){
     if (time<=0) return;
     document.querySelectorAll(".card.err,.card.ok").forEach(c=>c.classList.remove("err","ok"));
 
-    if (side==="en") {
+    if (side==="en"){
       document.querySelectorAll("#enList .card").forEach(c=>c.classList.remove("selected"));
-      selectedEn = id;
-      el.classList.add("selected");
+      selectedEn = id; el.classList.add("selected");
     } else {
       document.querySelectorAll("#ptList .card").forEach(c=>c.classList.remove("selected"));
-      selectedPt = id;
-      el.classList.add("selected");
+      selectedPt = id; el.classList.add("selected");
     }
 
     if (!(selectedEn && selectedPt)) return;
 
-    const a = bank.get(selectedEn);
-    const b = bank.get(selectedPt);
-
-    const exactMatch = selectedEn === selectedPt;
-    const semanticMatch = a && b && isEquivalentPT(a, b);
-    const match = exactMatch || semanticMatch;
+    const a = bank.get(selectedEn), b = bank.get(selectedPt);
+    const exact = selectedEn === selectedPt;
+    const semantic = a && b && isEquivalentPT(a,b);
+    const match = exact || semantic;
 
     const enEl = document.querySelector(`#enList .card[data-key="${selectedEn}"]`);
     const ptEl = document.querySelector(`#ptList .card[data-key="${selectedPt}"]`);
 
-    if (match && a) {
-      roundScore++;
-      totalCorrect++;
-      a.correct++;
-      a.streak++;
-      checkMastery(a);
+    if (match && a){
+      roundScore++; totalCorrect++;
+      a.correct++; a.streak++; checkMastery(a);
+      enEl?.classList.add("ok"); ptEl?.classList.add("ok");
 
-      enEl?.classList.add("ok");
-      ptEl?.classList.add("ok");
+      if (!exact && semantic) setMsg(`✅ Aceito por tradução equivalente: ${a.en} = ${b.pt}`, "ok");
+      else setMsg(`✅ ${a.en} = ${a.pt}`, "ok");
 
-      if (!exactMatch && semanticMatch && b) {
-        setMsg(`✅ Aceito por tradução equivalente: ${a.en} = ${b.pt}`, "ok");
-      } else {
-        setMsg(`✅ ${a.en} = ${a.pt}`, "ok");
-      }
-
-      maybeAdvance();
-      saveProgress();
+      maybeAdvance(); saveProgress();
       setTimeout(()=>replaceMatched(a.id), 220);
     } else {
-      if (a) { a.wrong++; a.streak = 0; }
-      if (b) { b.wrong++; b.streak = 0; }
-
-      markWrong(a, b);
-
+      if (a){ a.wrong++; a.streak = 0; }
+      if (b){ b.wrong++; b.streak = 0; }
+      markWrong(a,b);
       time = Math.max(0, time-2);
-      enEl?.classList.add("err");
-      ptEl?.classList.add("err");
+      enEl?.classList.add("err"); ptEl?.classList.add("err");
       setMsg("❌ Não bateu. -2s", "err");
       saveProgress();
     }
@@ -606,242 +543,217 @@
     setTimeout(()=>{ clearSelections(); hud(); checkEnd(); }, 90);
   }
 
-  function startTimer(){
-    clearInterval(timerId);
-    timerId = setInterval(()=>{
-      time--;
-      hud();
-      checkEnd();
-    },1000);
-  }
-
+  // ---------- end screen ----------
   function buildEndItems(){
     const m = new Map();
-
-    for (const it of wrongMap.values()) m.set(it.id, it);
-    for (const it of activeItems) m.set(it.id, it);
-
+    for (const i of wrongMap.values()) m.set(i.id, i);
+    for (const i of activeItems) m.set(i.id, i);
     return [...m.values()];
   }
 
-  function renderEndScreen(reason){
-    const items = buildEndItems();
+  function renderEnd(reason){
     const endList = $("endList");
     endList.innerHTML = "";
 
-    const summary = reason === "timeout"
-      ? `⏱️ Tempo esgotado. Acertos na rodada: ${roundScore}`
-      : `🏆 Rodada concluída. Acertos na rodada: ${roundScore}`;
+    const summary = reason==="timeout"
+      ? `⏱️ Tempo esgotado • Acertos: ${roundScore}`
+      : `🏁 Partida finalizada • Acertos: ${roundScore}`;
     $("endSummary").textContent = summary;
 
-    if (!items.length) {
-      const div = document.createElement("div");
-      div.className = "end-item";
-      div.innerHTML = `<span>Perfeito! Nenhum item pendente 🎉</span>`;
-      endList.appendChild(div);
+    const items = buildEndItems();
+    if (!items.length){
+      const d = document.createElement("div");
+      d.className = "end-item";
+      d.textContent = "Perfeito! Nenhum item pendente 🎉";
+      endList.appendChild(d);
     } else {
       items.forEach(it => {
         const row = document.createElement("div");
         row.className = "end-item";
 
-        const txt = document.createElement("span");
-        txt.textContent = `${it.en} = ${it.pt}`;
+        const t = document.createElement("span");
+        t.textContent = `${it.en} = ${it.pt}`;
 
-        const right = document.createElement("div");
-        right.className = "row";
-
-        if (playMode === "audio") {
-          const btn = document.createElement("button");
-          btn.textContent = "🔊";
-          btn.title = `Ouvir: ${it.en}`;
-          btn.addEventListener("click", () => speakSource(it.en));
-          right.appendChild(btn);
+        const r = document.createElement("div");
+        if (playMode==="audio"){
+          const b = document.createElement("button");
+          b.textContent = "🔊";
+          b.onclick = () => speakSource(it.en);
+          r.appendChild(b);
         }
 
-        row.appendChild(txt);
-        row.appendChild(right);
+        row.appendChild(t); row.appendChild(r);
         endList.appendChild(row);
       });
     }
 
-    goEndScreen();
+    showScreen("endScreen");
+  }
+
+  // ---------- timer & rounds ----------
+  function startTimer(){
+    clearInterval(timerId);
+    timerId = setInterval(()=>{
+      time--; hud(); checkEnd();
+    }, 1000);
   }
 
   function checkEnd(){
-    if (time<=0) {
+    if (time<=0){
       clearInterval(timerId);
-      renderEndScreen("timeout");
+      renderEnd("timeout");
       return;
     }
-
     if (activeItems.length===0){
       clearInterval(timerId);
-      renderEndScreen("clear");
+      renderEnd("clear");
     }
   }
 
   function newRound(){
     time = ROUND_TIME;
     roundScore = 0;
-    resetRoundBuffers();
+    wrongMap = new Map();
     clearSelections();
 
     roundNumber++;
-    roundMode = decideRoundMode();
+    roundMode = sessionType === "reinforce" ? "word" : decideRoundMode();
     decidePlayMode();
 
     fillBoard();
 
-    setMsg(`Nova partida (${roundMode==="phrase" ? "frases" : "palavras"}) • ${playMode==="audio" ? "Escuta" : "Leitura"} • Base ${CEFR[currentLevelIdx]}`);
+    const m = playMode==="audio" ? "Escuta" : "Leitura";
+    if (sessionType==="reinforce") setMsg(`🔥 Reforçando • palavras com mais erro • ${m}`);
+    else setMsg(`Nova partida (${roundMode==="phrase" ? "frases" : "palavras"}) • ${m}`);
+
     saveProgress();
-    goGameScreen();
+    goGame();
     startTimer();
   }
 
-  // ---------- report ----------
-  function dateISO(){ return new Date().toISOString(); }
+  // ---------- reports ----------
   function acc(c,w){ const t=c+w; return t ? c/t : 0; }
 
   function buildReport(){
     const items = [...bank.values()];
     const practiced = items.filter(i => i.correct+i.wrong>0);
-    const totalC = practiced.reduce((s,i)=>s+i.correct,0);
-    const totalW = practiced.reduce((s,i)=>s+i.wrong,0);
+    const c = practiced.reduce((s,i)=>s+i.correct,0);
+    const w = practiced.reduce((s,i)=>s+i.wrong,0);
 
     const byLevel = {};
     for (const lv of CEFR){
-      const arr = items.filter(i=>i.cefr===lv);
-      const c = arr.reduce((s,i)=>s+i.correct,0);
-      const w = arr.reduce((s,i)=>s+i.wrong,0);
+      const arr = items.filter(i => i.cefr===lv);
+      const lc = arr.reduce((s,i)=>s+i.correct,0);
+      const lw = arr.reduce((s,i)=>s+i.wrong,0);
       byLevel[lv] = {
-        attempts: c+w, correct:c, wrong:w, accuracy: acc(c,w),
-        masteredWords: arr.filter(i=>i.type==="word" && i.mastered).length
+        attempts: lc+lw, correct: lc, wrong: lw, accuracy: acc(lc,lw),
+        masteredWords: arr.filter(i => i.type==="word" && i.mastered).length
       };
     }
 
     const hardest = [...practiced]
-      .sort((a,b)=> (b.wrong-a.wrong) || ((b.correct+b.wrong)-(a.correct+a.wrong)))
-      .slice(0,10).map(i=>({...i, attempts:i.correct+i.wrong, accuracy: acc(i.correct,i.wrong)}));
-
-    const best = [...practiced]
-      .filter(i => i.correct+i.wrong >= 3)
-      .sort((a,b)=> (b.correct-a.correct) || (acc(b.correct,b.wrong)-acc(a.correct,a.wrong)))
-      .slice(0,10).map(i=>({...i, attempts:i.correct+i.wrong, accuracy: acc(i.correct,i.wrong)}));
+      .sort((a,b)=>(b.wrong-a.wrong)||((b.correct+b.wrong)-(a.correct+a.wrong)))
+      .slice(0,10)
+      .map(i=>({en:i.en,pt:i.pt,type:i.type,level:i.cefr,attempts:i.correct+i.wrong,correct:i.correct,wrong:i.wrong,accuracy:acc(i.correct,i.wrong)}));
 
     return {
-      generatedAt: dateISO(),
-      language: getLangCfg().label,
+      generatedAt: new Date().toISOString(),
+      language: langCfg().label,
+      sessionType,
       currentLevel: CEFR[currentLevelIdx],
       roundsPlayed: roundNumber,
-      totals: { attempts: totalC+totalW, correct: totalC, wrong: totalW, accuracy: acc(totalC,totalW) },
+      totals: { attempts:c+w, correct:c, wrong:w, accuracy:acc(c,w) },
       byLevel,
-      hardestItems: hardest.map(i=>({en:i.en,pt:i.pt,type:i.type,level:i.cefr,attempts:i.attempts,correct:i.correct,wrong:i.wrong,accuracy:i.accuracy})),
-      bestItems: best.map(i=>({en:i.en,pt:i.pt,type:i.type,level:i.cefr,attempts:i.attempts,correct:i.correct,wrong:i.wrong,accuracy:i.accuracy}))
+      hardestItems: hardest
     };
   }
 
-  function download(name, content, mime){
-    const blob = new Blob([content], { type: mime });
+  function reportToCSV(r){
+    const rows = [];
+    rows.push(["language", r.language]);
+    rows.push(["sessionType", r.sessionType]);
+    rows.push(["section","en","pt","type","level","attempts","correct","wrong","accuracy"]);
+    r.hardestItems.forEach(i =>
+      rows.push(["hardest", i.en, i.pt, i.type, i.level, i.attempts, i.correct, i.wrong, (i.accuracy*100).toFixed(1)+"%"])
+    );
+    rows.push([]);
+    rows.push(["level","attempts","correct","wrong","accuracy","masteredWords"]);
+    CEFR.forEach(lv => {
+      const x = r.byLevel[lv];
+      rows.push([lv, x.attempts, x.correct, x.wrong, (x.accuracy*100).toFixed(1)+"%", x.masteredWords]);
+    });
+    return rows.map(cols => cols.map(v => `"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  }
+
+  function download(name, text, mime){
+    const blob = new Blob([text], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = name; a.click();
     URL.revokeObjectURL(url);
   }
 
-  function reportToCSV(r){
-    const rows = [];
-    rows.push(["language", r.language]);
-    rows.push(["section","en","pt","type","level","attempts","correct","wrong","accuracy"]);
-    r.hardestItems.forEach(i => rows.push(["hardest",i.en,i.pt,i.type,i.level,i.attempts,i.correct,i.wrong,(i.accuracy*100).toFixed(1)+"%"]));
-    r.bestItems.forEach(i => rows.push(["best",i.en,i.pt,i.type,i.level,i.attempts,i.correct,i.wrong,(i.accuracy*100).toFixed(1)+"%"]));
-    rows.push([]);
-    rows.push(["level","attempts","correct","wrong","accuracy","masteredWords"]);
-    CEFR.forEach(lv => {
-      const x = r.byLevel[lv];
-      rows.push([lv,x.attempts,x.correct,x.wrong,(x.accuracy*100).toFixed(1)+"%",x.masteredWords]);
-    });
-    return rows.map(cols => cols.map(v => `"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  // ---------- flow ----------
+  async function switchLanguage(lang){
+    currentLanguage = lang;
+    localStorage.setItem(KEYS.lang, currentLanguage);
+
+    const cfg = langCfg();
+    $("gameTitle").textContent = cfg.label;
+    $("sourceColumnTitle").textContent = cfg.source;
+    $("targetColumnTitle").textContent = cfg.target;
+
+    renderLanguageButtons();
   }
 
-  // ---------- actions ----------
-  async function startGameFlow(){
-    try {
-      localStorage.setItem(KEYS.lang, currentLanguage);
+  async function startGameFlow(mode = "normal"){
+    try{
+      sessionType = mode;
       content = await loadContent();
       rebuildBank();
       hud();
       newRound();
-    } catch (e) {
-      goStartScreen();
+    } catch (e){
+      goStart();
       alert(`Erro ao iniciar: ${e.message}`);
     }
   }
 
-  async function switchLanguage(langId){
-    currentLanguage = langId;
-    localStorage.setItem(KEYS.lang, currentLanguage);
-    $("languageSelect").value = currentLanguage;
-
-    // Não inicia automaticamente, só prepara UI
-    const cfg = getLangCfg();
-    $("gameTitle").textContent = cfg.label;
-    $("sourceColumnTitle").textContent = cfg.sourceLabel;
-    $("targetColumnTitle").textContent = cfg.targetLabel;
-  }
-
   // ---------- events ----------
   function bindEvents(){
-    $("startGameBtn").addEventListener("click", startGameFlow);
-    $("goSettingsBtn").addEventListener("click", () => goSettingsScreen("startScreen"));
+    $("startGameBtn").addEventListener("click", () => startGameFlow("normal"));
+    $("startReinforceBtn").addEventListener("click", () => startGameFlow("reinforce"));
+    $("goSettingsBtn").addEventListener("click", () => goSettings("startScreen"));
+    $("openSettingsFromGameBtn").addEventListener("click", () => { clearInterval(timerId); goSettings("gameScreen"); });
 
-    $("openSettingsFromGameBtn").addEventListener("click", () => {
-      clearInterval(timerId);
-      goSettingsScreen("gameScreen");
-    });
-
-    $("goMenuFromGameBtn").addEventListener("click", goStartScreen);
-    $("goMenuFromSettingsBtn").addEventListener("click", goStartScreen);
-    $("goMenuFromEndBtn").addEventListener("click", goStartScreen);
-
-    $("backFromSettingsBtn").addEventListener("click", () => {
-      goBackFromSettings();
-      if (previousScreen === "gameScreen" && time > 0) startTimer();
-    });
-
+    $("goMenuFromGameBtn").addEventListener("click", goStart);
+    $("goMenuFromSettingsBtn").addEventListener("click", goStart);
+    $("goMenuFromEndBtn").addEventListener("click", goStart);
+    $("backFromSettingsBtn").addEventListener("click", goBackFromSettings);
     $("restartBtn").addEventListener("click", () => newRound());
 
-    $("languageSelect").addEventListener("change", (e) => {
-      switchLanguage(e.target.value);
+    $("langEnPtBtn").addEventListener("click", () => switchLanguage("en-pt"));
+
+    $("langJaPtBtn").addEventListener("click", () => {
+      alert("Japonês estará disponível na próxima etapa.");
     });
 
-    $("addTimeBtn").addEventListener("click", () => {
-      time += 30;
-      hud();
-      if (document.getElementById("gameScreen").classList.contains("active")) {
-        setMsg("+30s");
-      }
-    });
-
-    $("fullResetBtn").addEventListener("click", () => {
-      if (!bank.size) return;
-      resetProgress();
-      alert("Progresso zerado.");
-    });
+    $("addTimeBtn").addEventListener("click", () => { time += 30; hud(); });
+    $("fullResetBtn").addEventListener("click", () => { if (bank.size){ resetProgress(); alert("Progresso zerado."); }});
 
     $("pickJsonBtn").addEventListener("click", () => $("fileInput").click());
-
     $("fileInput").addEventListener("change", async (ev) => {
       const file = ev.target.files?.[0];
       if (!file) return;
-      try {
-        const text = await file.text();
-        const obj = JSON.parse(text);
+      try{
+        const txt = await file.text();
+        const obj = JSON.parse(txt);
         validateContent(obj);
-        saveCustomContent(obj);
+        localStorage.setItem(keyCustom(), JSON.stringify(obj));
         content = obj;
         rebuildBank();
         alert(`JSON aplicado: ${file.name}`);
-      } catch (e) {
+      } catch(e){
         alert(`JSON inválido: ${e.message}`);
       } finally {
         ev.target.value = "";
@@ -849,42 +761,38 @@
     });
 
     $("useDefaultBtn").addEventListener("click", async () => {
-      try {
-        clearCustomContent();
+      try{
+        localStorage.removeItem(keyCustom());
         content = await loadDefaultContent();
         validateContent(content);
         rebuildBank();
         alert("Conteúdo padrão ativado.");
-      } catch(e) {
-        alert(`Falha ao voltar padrão: ${e.message}`);
+      } catch(e){
+        alert(`Falha ao ativar padrão: ${e.message}`);
       }
     });
 
     $("reportBtn").addEventListener("click", () => {
-      if (!bank.size) {
-        alert("Inicie ao menos uma partida antes de gerar relatório.");
-        return;
-      }
-      const report = buildReport();
-      const f = $("reportFormat").value;
+      if (!bank.size){ alert("Inicie uma partida antes."); return; }
+      const r = buildReport();
+      const fmt = $("reportFormat").value;
       const day = new Date().toISOString().slice(0,10);
-      const langTag = currentLanguage.replace("-", "_");
-
-      if (f === "json") {
-        download(`relatorio_${langTag}_${day}.json`, JSON.stringify(report, null, 2), "application/json;charset=utf-8");
+      const tag = currentLanguage.replace("-", "_");
+      if (fmt==="json"){
+        download(`relatorio_${tag}_${day}.json`, JSON.stringify(r, null, 2), "application/json;charset=utf-8");
       } else {
-        download(`relatorio_${langTag}_${day}.csv`, reportToCSV(report), "text/csv;charset=utf-8");
+        download(`relatorio_${tag}_${day}.csv`, reportToCSV(r), "text/csv;charset=utf-8");
       }
-      alert(`Relatório ${f.toUpperCase()} gerado.`);
+      alert(`Relatório ${fmt.toUpperCase()} gerado.`);
     });
   }
 
   async function init(){
     bindEvents();
     await switchLanguage(currentLanguage);
-    goStartScreen();
+    goStart();
 
-    if ("serviceWorker" in navigator) {
+    if ("serviceWorker" in navigator){
       navigator.serviceWorker.register("sw.js").catch(()=>{});
     }
   }
