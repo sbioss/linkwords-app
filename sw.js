@@ -1,4 +1,4 @@
-const CACHE = "linkwords-cache-v4";
+const CACHE = "linkwords-cache-v5";
 const ASSETS = ["./", "./index.html", "./app.js", "./manifest.json", "./content.json"];
 
 self.addEventListener("install", (e) => {

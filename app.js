@@ -6,9 +6,29 @@
   const REVIEW_CHANCE = 0.18;
   const CEFR = ["A1", "A2", "B1", "B2", "C1", "C2"];
 
+  const LANGS = {
+    "en-pt": {
+      id: "en-pt",
+      label: "Inglês → Português",
+      sourceLabel: "INGLÊS",
+      targetLabel: "PORTUGUÊS",
+      defaultFile: "content.json",
+      ttsLang: "en-US"
+    },
+    "ja-pt": {
+      id: "ja-pt",
+      label: "Japonês → Português",
+      sourceLabel: "JAPONÊS",
+      targetLabel: "PORTUGUÊS",
+      defaultFile: "content-ja.json",
+      ttsLang: "ja-JP"
+    }
+  };
+
   const KEYS = {
     customContent: "lw_custom_content_v1",
-    progress: "lw_progress_v1"
+    progress: "lw_progress_v1",
+    lang: "lw_lang_v1"
   };
 
   const $ = (id) => document.getElementById(id);
@@ -19,10 +39,43 @@
   let content = null;
   let bank = new Map();
   let activeItems = [];
+  let wrongMap = new Map();
+
+  let currentLanguage = localStorage.getItem(KEYS.lang) || "en-pt";
 
   let time = ROUND_TIME, roundScore = 0, totalCorrect = 0;
   let currentLevelIdx = 0, introducedNextCount = 0, roundNumber = 0, roundMode = "word", playMode = "text";
   let selectedEn = null, selectedPt = null, timerId = null;
+
+  let previousScreen = "startScreen";
+
+  // ---------- screen ----------
+  function showScreen(id){
+    document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+    $(id)?.classList.add("active");
+  }
+
+  function goStartScreen(){
+    clearInterval(timerId);
+    showScreen("startScreen");
+  }
+
+  function goGameScreen(){
+    showScreen("gameScreen");
+  }
+
+  function goSettingsScreen(from = "startScreen"){
+    previousScreen = from;
+    showScreen("settingsScreen");
+  }
+
+  function goBackFromSettings(){
+    showScreen(previousScreen || "startScreen");
+  }
+
+  function goEndScreen(){
+    showScreen("endScreen");
+  }
 
   // ---------- helpers ----------
   function enKey(text){
@@ -39,19 +92,17 @@
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/[^a-z0-9\u3040-\u30ff\u4e00-\u9faf\s]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
   }
 
-  // ptAlt opcional no JSON (ex: { en:"Do", pt:"Fazer", ptAlt:["Executar"] })
   function ptVariants(item){
     const base = [item?.pt || ""];
     const extra = Array.isArray(item?.ptAlt) ? item.ptAlt : [];
     return [...base, ...extra].map(normText).filter(Boolean);
   }
 
-  // aceita equivalência semântica de tradução
   function isEquivalentPT(enItem, ptItem){
     const a = new Set(ptVariants(enItem));
     const b = new Set(ptVariants(ptItem));
@@ -59,9 +110,14 @@
     return false;
   }
 
+  function getLangCfg(){
+    return LANGS[currentLanguage] || LANGS["en-pt"];
+  }
+
   // ---------- UI ----------
   function setMsg(t, kind=""){
     const el = $("msg");
+    if (!el) return;
     el.textContent = t;
     el.style.color = kind==="ok" ? "#86efac" : kind==="err" ? "#fca5a5" : "#94a3b8";
   }
@@ -71,80 +127,41 @@
     $("xp").textContent = totalCorrect;
     $("roundScore").textContent = roundScore;
     $("time").textContent = time;
-    const pm = $("playMode");
-    if (pm) pm.textContent = playMode === "audio" ? "Escuta" : "Leitura";
+    $("playMode").textContent = playMode === "audio" ? "Escuta" : "Leitura";
+
+    const cfg = getLangCfg();
+    $("sourceColumnTitle").textContent = cfg.sourceLabel;
+    $("targetColumnTitle").textContent = cfg.targetLabel;
+    $("gameTitle").textContent = cfg.label;
   }
 
-  function clearUnanswered(){
-    $("unansweredList").innerHTML = "";
-    $("unansweredBox").style.display = "none";
-  }
-
-  function showUnanswered(){
-    const ul = $("unansweredList");
-    ul.innerHTML = "";
-
-    const boxTitle = document.querySelector("#unansweredBox h4");
-    if (boxTitle) {
-      boxTitle.textContent = playMode === "audio"
-        ? "Itens sem resposta (tradução + áudio)"
-        : "Itens que ficaram sem resposta nesta partida";
-    }
-
-    const u = new Map();
-    activeItems.forEach(i => u.set(i.id, i));
-
-    for (const it of u.values()) {
-      const li = document.createElement("li");
-
-      if (playMode === "audio") {
-        const text = document.createElement("span");
-        text.textContent = `${it.pt} `;
-
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.textContent = "🔊";
-        btn.title = `Ouvir: ${it.en}`;
-        btn.style.marginLeft = "8px";
-        btn.style.padding = "2px 8px";
-        btn.style.borderRadius = "8px";
-        btn.style.border = "1px solid #334155";
-        btn.style.background = "#111827";
-        btn.style.color = "#e5e7eb";
-        btn.style.cursor = "pointer";
-        btn.addEventListener("click", () => speakEN(it.en));
-
-        li.appendChild(text);
-        li.appendChild(btn);
-      } else {
-        li.textContent = `${it.en} = ${it.pt}`;
-      }
-
-      ul.appendChild(li);
-    }
-
-    if (u.size) $("unansweredBox").style.display = "block";
+  function resetRoundBuffers(){
+    wrongMap = new Map();
+    selectedEn = null;
+    selectedPt = null;
   }
 
   // ---------- audio ----------
-  function speakEN(text){
+  function speakSource(text){
+    const cfg = getLangCfg();
+
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = "en-US";
+      u.lang = cfg.ttsLang;
       u.rate = 0.95;
       window.speechSynthesis.speak(u);
       return;
     }
 
     const encoded = encodeURIComponent(text);
-    const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=en&q=${encoded}`;
+    const target = cfg.ttsLang.startsWith("ja") ? "ja" : "en";
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${target}&q=${encoded}`;
     const audio = new Audio(url);
     audio.play().catch(() => {});
   }
 
   function decidePlayMode(){
-    // alternância fixa: rodada ímpar = texto | rodada par = áudio
     playMode = (roundNumber % 2 === 0) ? "audio" : "text";
   }
 
@@ -161,13 +178,21 @@
   }
 
   async function loadDefaultContent() {
-    const res = await fetch("content.json");
-    if (!res.ok) throw new Error("Não consegui carregar content.json");
+    const cfg = getLangCfg();
+    const res = await fetch(cfg.defaultFile);
+    if (!res.ok) throw new Error(`Não consegui carregar ${cfg.defaultFile}`);
     return res.json();
   }
 
+  function customKeyByLang(){
+    return `${KEYS.customContent}_${currentLanguage}`;
+  }
+  function progressKeyByLang(){
+    return `${KEYS.progress}_${currentLanguage}`;
+  }
+
   async function loadContent() {
-    const custom = localStorage.getItem(KEYS.customContent);
+    const custom = localStorage.getItem(customKeyByLang());
     if (custom) {
       const parsed = JSON.parse(custom);
       validateContent(parsed);
@@ -179,16 +204,16 @@
   }
 
   function saveCustomContent(obj){
-    localStorage.setItem(KEYS.customContent, JSON.stringify(obj));
+    localStorage.setItem(customKeyByLang(), JSON.stringify(obj));
   }
 
   function clearCustomContent(){
-    localStorage.removeItem(KEYS.customContent);
+    localStorage.removeItem(customKeyByLang());
   }
 
   // ---------- bank ----------
   function makeId(type, lv, i, en){
-    const slug = String(en).toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 28);
+    const slug = String(en).toLowerCase().replace(/[^a-z0-9\u3040-\u30ff\u4e00-\u9faf]+/g, "-").slice(0, 28);
     return `${type}_${lv}_${i}_${slug}`;
   }
 
@@ -233,13 +258,13 @@
       stats[id] = { c: it.correct, w: it.wrong, s: it.streak, m: it.mastered };
     }
 
-    localStorage.setItem(KEYS.progress, JSON.stringify({
+    localStorage.setItem(progressKeyByLang(), JSON.stringify({
       totalCorrect, currentLevelIdx, introducedNextCount, roundNumber, stats
     }));
   }
 
   function loadProgress(){
-    const raw = localStorage.getItem(KEYS.progress);
+    const raw = localStorage.getItem(progressKeyByLang());
     if (!raw) return;
     try{
       const p = JSON.parse(raw);
@@ -300,14 +325,14 @@
 
     if (introducedNextCount===0 && curr.ratio>=0.72 && curr.attempts>=24 && curr.acc>=0.68) {
       introducedNextCount = 1;
-      setMsg(`Introduzindo 1 palavra de ${nextLv}.`, "ok");
+      setMsg(`Introduzindo 1 item de ${nextLv}.`, "ok");
       saveProgress();
       return;
     }
 
     if (introducedNextCount===1 && curr.ratio>=0.84 && curr.attempts>=34 && curr.acc>=0.72) {
       introducedNextCount = 2;
-      setMsg(`Agora até 2 palavras de ${nextLv}.`, "ok");
+      setMsg(`Agora até 2 itens de ${nextLv}.`, "ok");
       saveProgress();
       return;
     }
@@ -480,7 +505,7 @@
         b.setAttribute("aria-label", `Ouvir ${it.en}`);
         b.title = "Toque para ouvir";
         b.onclick = () => {
-          speakEN(it.en);
+          speakSource(it.en);
           pick("en", it.id, b);
         };
       } else {
@@ -513,6 +538,11 @@
     if (!it.mastered && it.streak >= MASTER_STREAK && it.correct >= MASTER_CORRECT) {
       it.mastered = true;
     }
+  }
+
+  function markWrong(a, b){
+    if (a) wrongMap.set(a.id, a);
+    if (b) wrongMap.set(b.id, b);
   }
 
   function pick(side, id, el){
@@ -564,6 +594,8 @@
       if (a) { a.wrong++; a.streak = 0; }
       if (b) { b.wrong++; b.streak = 0; }
 
+      markWrong(a, b);
+
       time = Math.max(0, time-2);
       enEl?.classList.add("err");
       ptEl?.classList.add("err");
@@ -583,26 +615,76 @@
     },1000);
   }
 
+  function buildEndItems(){
+    const m = new Map();
+
+    for (const it of wrongMap.values()) m.set(it.id, it);
+    for (const it of activeItems) m.set(it.id, it);
+
+    return [...m.values()];
+  }
+
+  function renderEndScreen(reason){
+    const items = buildEndItems();
+    const endList = $("endList");
+    endList.innerHTML = "";
+
+    const summary = reason === "timeout"
+      ? `⏱️ Tempo esgotado. Acertos na rodada: ${roundScore}`
+      : `🏆 Rodada concluída. Acertos na rodada: ${roundScore}`;
+    $("endSummary").textContent = summary;
+
+    if (!items.length) {
+      const div = document.createElement("div");
+      div.className = "end-item";
+      div.innerHTML = `<span>Perfeito! Nenhum item pendente 🎉</span>`;
+      endList.appendChild(div);
+    } else {
+      items.forEach(it => {
+        const row = document.createElement("div");
+        row.className = "end-item";
+
+        const txt = document.createElement("span");
+        txt.textContent = `${it.en} = ${it.pt}`;
+
+        const right = document.createElement("div");
+        right.className = "row";
+
+        if (playMode === "audio") {
+          const btn = document.createElement("button");
+          btn.textContent = "🔊";
+          btn.title = `Ouvir: ${it.en}`;
+          btn.addEventListener("click", () => speakSource(it.en));
+          right.appendChild(btn);
+        }
+
+        row.appendChild(txt);
+        row.appendChild(right);
+        endList.appendChild(row);
+      });
+    }
+
+    goEndScreen();
+  }
+
   function checkEnd(){
     if (time<=0) {
       clearInterval(timerId);
-      setMsg(`⏱️ Tempo esgotado! Acertos: ${roundScore}`, "err");
-      showUnanswered();
+      renderEndScreen("timeout");
       return;
     }
 
     if (activeItems.length===0){
       clearInterval(timerId);
-      setMsg(`🏆 Rodada concluída! Acertos: ${roundScore}`, "ok");
-      showUnanswered();
+      renderEndScreen("clear");
     }
   }
 
   function newRound(){
     time = ROUND_TIME;
     roundScore = 0;
+    resetRoundBuffers();
     clearSelections();
-    clearUnanswered();
 
     roundNumber++;
     roundMode = decideRoundMode();
@@ -610,10 +692,9 @@
 
     fillBoard();
 
-    // sem autoplay no modo áudio (toca só no clique)
     setMsg(`Nova partida (${roundMode==="phrase" ? "frases" : "palavras"}) • ${playMode==="audio" ? "Escuta" : "Leitura"} • Base ${CEFR[currentLevelIdx]}`);
-
     saveProgress();
+    goGameScreen();
     startTimer();
   }
 
@@ -649,6 +730,7 @@
 
     return {
       generatedAt: dateISO(),
+      language: getLangCfg().label,
       currentLevel: CEFR[currentLevelIdx],
       roundsPlayed: roundNumber,
       totals: { attempts: totalC+totalW, correct: totalC, wrong: totalW, accuracy: acc(totalC,totalW) },
@@ -668,6 +750,7 @@
 
   function reportToCSV(r){
     const rows = [];
+    rows.push(["language", r.language]);
     rows.push(["section","en","pt","type","level","attempts","correct","wrong","accuracy"]);
     r.hardestItems.forEach(i => rows.push(["hardest",i.en,i.pt,i.type,i.level,i.attempts,i.correct,i.wrong,(i.accuracy*100).toFixed(1)+"%"]));
     r.bestItems.forEach(i => rows.push(["best",i.en,i.pt,i.type,i.level,i.attempts,i.correct,i.wrong,(i.accuracy*100).toFixed(1)+"%"]));
@@ -680,81 +763,130 @@
     return rows.map(cols => cols.map(v => `"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");
   }
 
-  // ---------- events ----------
-  async function init(){
+  // ---------- actions ----------
+  async function startGameFlow(){
     try {
+      localStorage.setItem(KEYS.lang, currentLanguage);
       content = await loadContent();
       rebuildBank();
       hud();
       newRound();
-      setMsg("Pronto. Conteúdo carregado.");
     } catch (e) {
-      setMsg(`Erro ao carregar conteúdo: ${e.message}`, "err");
+      goStartScreen();
+      alert(`Erro ao iniciar: ${e.message}`);
     }
   }
 
-  $("newRoundBtn").addEventListener("click", newRound);
+  async function switchLanguage(langId){
+    currentLanguage = langId;
+    localStorage.setItem(KEYS.lang, currentLanguage);
+    $("languageSelect").value = currentLanguage;
 
-  $("addTimeBtn").addEventListener("click", () => {
-    time += 30;
-    hud();
-    setMsg("+30s");
-  });
+    // Não inicia automaticamente, só prepara UI
+    const cfg = getLangCfg();
+    $("gameTitle").textContent = cfg.label;
+    $("sourceColumnTitle").textContent = cfg.sourceLabel;
+    $("targetColumnTitle").textContent = cfg.targetLabel;
+  }
 
-  $("fullResetBtn").addEventListener("click", () => {
-    resetProgress();
-    newRound();
-    setMsg("Progresso zerado.");
-  });
+  // ---------- events ----------
+  function bindEvents(){
+    $("startGameBtn").addEventListener("click", startGameFlow);
+    $("goSettingsBtn").addEventListener("click", () => goSettingsScreen("startScreen"));
 
-  $("pickJsonBtn").addEventListener("click", () => $("fileInput").click());
+    $("openSettingsFromGameBtn").addEventListener("click", () => {
+      clearInterval(timerId);
+      goSettingsScreen("gameScreen");
+    });
 
-  $("fileInput").addEventListener("change", async (ev) => {
-    const file = ev.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const obj = JSON.parse(text);
-      validateContent(obj);
-      saveCustomContent(obj);
-      content = obj;
-      rebuildBank();
-      newRound();
-      setMsg(`JSON aplicado: ${file.name}`, "ok");
-    } catch (e) {
-      setMsg(`JSON inválido: ${e.message}`, "err");
-    } finally {
-      ev.target.value = "";
+    $("goMenuFromGameBtn").addEventListener("click", goStartScreen);
+    $("goMenuFromSettingsBtn").addEventListener("click", goStartScreen);
+    $("goMenuFromEndBtn").addEventListener("click", goStartScreen);
+
+    $("backFromSettingsBtn").addEventListener("click", () => {
+      goBackFromSettings();
+      if (previousScreen === "gameScreen" && time > 0) startTimer();
+    });
+
+    $("restartBtn").addEventListener("click", () => newRound());
+
+    $("languageSelect").addEventListener("change", (e) => {
+      switchLanguage(e.target.value);
+    });
+
+    $("addTimeBtn").addEventListener("click", () => {
+      time += 30;
+      hud();
+      if (document.getElementById("gameScreen").classList.contains("active")) {
+        setMsg("+30s");
+      }
+    });
+
+    $("fullResetBtn").addEventListener("click", () => {
+      if (!bank.size) return;
+      resetProgress();
+      alert("Progresso zerado.");
+    });
+
+    $("pickJsonBtn").addEventListener("click", () => $("fileInput").click());
+
+    $("fileInput").addEventListener("change", async (ev) => {
+      const file = ev.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const obj = JSON.parse(text);
+        validateContent(obj);
+        saveCustomContent(obj);
+        content = obj;
+        rebuildBank();
+        alert(`JSON aplicado: ${file.name}`);
+      } catch (e) {
+        alert(`JSON inválido: ${e.message}`);
+      } finally {
+        ev.target.value = "";
+      }
+    });
+
+    $("useDefaultBtn").addEventListener("click", async () => {
+      try {
+        clearCustomContent();
+        content = await loadDefaultContent();
+        validateContent(content);
+        rebuildBank();
+        alert("Conteúdo padrão ativado.");
+      } catch(e) {
+        alert(`Falha ao voltar padrão: ${e.message}`);
+      }
+    });
+
+    $("reportBtn").addEventListener("click", () => {
+      if (!bank.size) {
+        alert("Inicie ao menos uma partida antes de gerar relatório.");
+        return;
+      }
+      const report = buildReport();
+      const f = $("reportFormat").value;
+      const day = new Date().toISOString().slice(0,10);
+      const langTag = currentLanguage.replace("-", "_");
+
+      if (f === "json") {
+        download(`relatorio_${langTag}_${day}.json`, JSON.stringify(report, null, 2), "application/json;charset=utf-8");
+      } else {
+        download(`relatorio_${langTag}_${day}.csv`, reportToCSV(report), "text/csv;charset=utf-8");
+      }
+      alert(`Relatório ${f.toUpperCase()} gerado.`);
+    });
+  }
+
+  async function init(){
+    bindEvents();
+    await switchLanguage(currentLanguage);
+    goStartScreen();
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("sw.js").catch(()=>{});
     }
-  });
-
-  $("useDefaultBtn").addEventListener("click", async () => {
-    try {
-      clearCustomContent();
-      content = await loadDefaultContent();
-      validateContent(content);
-      rebuildBank();
-      newRound();
-      setMsg("Conteúdo padrão ativado.", "ok");
-    } catch(e) {
-      setMsg(`Falha ao voltar padrão: ${e.message}`, "err");
-    }
-  });
-
-  $("reportBtn").addEventListener("click", () => {
-    const report = buildReport();
-    const f = $("reportFormat").value;
-    const day = new Date().toISOString().slice(0,10);
-    if (f === "json") {
-      download(`relatorio-${day}.json`, JSON.stringify(report, null, 2), "application/json;charset=utf-8");
-    } else {
-      download(`relatorio-${day}.csv`, reportToCSV(report), "text/csv;charset=utf-8");
-    }
-    setMsg(`Relatório ${f.toUpperCase()} gerado.`, "ok");
-  });
-
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js").catch(()=>{});
   }
 
   init();
