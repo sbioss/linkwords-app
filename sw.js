@@ -1,4 +1,4 @@
-const CACHE = "linkwords-cache-v8";
+const CACHE = "linkwords-cache-v9";
 const ASSETS = [
   "./",
   "./index.html",
@@ -27,13 +27,11 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const req = e.request;
-
   if (req.method !== "GET") return;
 
   const url = new URL(req.url);
   const isSameOrigin = url.origin === self.location.origin;
 
-  // Navegação: network-first com fallback
   if (req.mode === "navigate") {
     e.respondWith(
       fetch(req)
@@ -45,16 +43,12 @@ self.addEventListener("fetch", (e) => {
           return res;
         })
         .catch(async () => {
-          return (
-            (await caches.match(req)) ||
-            (await caches.match("./index.html"))
-          );
+          return (await caches.match(req)) || (await caches.match("./index.html"));
         })
     );
     return;
   }
 
-  // Assets do mesmo domínio: cache-first + atualização em background
   if (isSameOrigin) {
     e.respondWith(
       caches.match(req).then((cached) => {
@@ -74,6 +68,5 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  // externos
   e.respondWith(fetch(req).catch(() => caches.match(req)));
 });
